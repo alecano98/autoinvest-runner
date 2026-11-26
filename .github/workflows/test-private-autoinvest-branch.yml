@@ -1,6 +1,10 @@
 name: AutoInvest private source tests
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/test-private-autoinvest-branch.yml"
   workflow_dispatch:
 
 permissions:
