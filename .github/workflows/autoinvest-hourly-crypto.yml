@@ -69,7 +69,6 @@ jobs:
           set -euo pipefail
           test -n "$SUPABASE_URL" || { echo "::error::Missing SUPABASE_URL repository secret"; exit 1; }
           test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo "::error::Missing SUPABASE_SERVICE_ROLE_KEY repository secret"; exit 1; }
-          test -n "$AUTOINVEST_SOURCE_READ_TOKEN" || true
           mkdir -p /tmp/autoinvest-crypto
           args=(--lookback-days "$LOOKBACK_DAYS" --output /tmp/autoinvest-crypto/crypto-paper-report.json)
           if [[ "$GITHUB_EVENT_NAME" == "schedule" || "$RUN_MODE" == "apply" ]]; then
