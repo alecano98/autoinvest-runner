@@ -1,0 +1,59 @@
+name: AutoInvest private paper runner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autoinvest-shared-paper-ledger
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    name: Private algorithm dry-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout private AutoInvest source (read-only token)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: alecano98/autoinvest
+          ref: main
+          token: ${{ secrets.AUTOINVEST_SOURCE_READ_TOKEN }}
+          path: source
+          persist-credentials: false
+
+      - name: Install Python dependencies
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python3.11 --version
+          python3.11 -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run read-only paper dry-run
+        working-directory: source
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          AUTOINVEST_COST_SCHEDULE_JSON: ${{ secrets.AUTOINVEST_COST_SCHEDULE_JSON }}
+          AUTOINVEST_CRYPTO_COST_SCHEDULE_JSON: ${{ secrets.AUTOINVEST_CRYPTO_COST_SCHEDULE_JSON }}
+          AUTOINVEST_CRYPTO_LOOKBACK_DAYS: "120"
+          AUTOINVEST_SYMBOLS: "SPY,QQQ,IWM,DIA,EFA,EEM,VEA,VWO,VGK,EWJ,EWQ,EWU,EWG,EWZ,FXI,INDA,EWC,EWA,TLT,IEF,SHY,LQD,HYG,AGG,BND,TIP,EMB,BIL,SGOV,GLD,SLV,DBC,PDBC,XLK,XLF,XLI,XLV,XLP,XLY,XLE,XLU,XLRE,AAPL,MSFT,AMZN,GOOGL,META,NVDA,JPM,BAC,WFC,GS,V,MA,UNH,JNJ,ABBV,PFE,XOM,CVX,CAT,DE,HON,GE,UPS,COST,WMT,HD,MCD,KO,PEP,DIS,NFLX,CRM,ORCL,CSCO,INTC,AMD,QCOM,TXN,NKE,TGT"
+          AUTOINVEST_START_DATE: "2016-01-01"
+          ALPACA_DATA_FEED: "iex"
+          PYTHONPATH: "."
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_URL" || { echo "::error::Missing SUPABASE_URL secret"; exit 1; }
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo "::error::Missing SUPABASE_SERVICE_ROLE_KEY secret"; exit 1; }
+          test -n "$ALPACA_API_KEY" || { echo "::error::Missing ALPACA_API_KEY secret"; exit 1; }
+          test -n "$ALPACA_SECRET_KEY" || { echo "::error::Missing ALPACA_SECRET_KEY secret"; exit 1; }
+          test -n "$AUTOINVEST_COST_SCHEDULE_JSON" || { echo "::error::Missing AUTOINVEST_COST_SCHEDULE_JSON secret"; exit 1; }
+          python3.11 scripts/run_integrated_daily_paper_supabase.py --start-date "$AUTOINVEST_START_DATE" --feed "$ALPACA_DATA_FEED" > /tmp/autoinvest-dry-run.json
+          python3.11 -m json.tool /tmp/autoinvest-dry-run.json > /dev/null
+          echo "Dry-run completed. Report is intentionally not published in this public repository's logs or artifacts."
