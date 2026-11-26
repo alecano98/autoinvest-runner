@@ -61,4 +61,36 @@ jobs:
           test -n "$AUTOINVEST_COST_SCHEDULE_JSON" || { echo "::error::Missing AUTOINVEST_COST_SCHEDULE_JSON secret"; exit 1; }
           python scripts/run_integrated_daily_paper_supabase.py --start-date "$AUTOINVEST_START_DATE" --feed "$ALPACA_DATA_FEED" > /tmp/autoinvest-dry-run.json
           python -m json.tool /tmp/autoinvest-dry-run.json > /dev/null
-          echo "Dry-run completed. Report is intentionally not published in this public repository's logs or artifacts."
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import requests
+
+          with Path("/tmp/autoinvest-dry-run.json").open(encoding="utf-8") as report_file:
+              report = json.load(report_file)
+
+          payload = {
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "run_number": int(os.environ["GITHUB_RUN_NUMBER"]),
+              "report_completeness": report.get("report_completeness", "partial"),
+              "report": report,
+          }
+          base_url = os.environ["SUPABASE_URL"].rstrip("/")
+          service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          response = requests.post(
+              f"{base_url}/rest/v1/autoinvest_paper_run_reports",
+              params={"on_conflict": "run_id"},
+              headers={
+                  "apikey": service_key,
+                  "Authorization": f"Bearer {service_key}",
+                  "Content-Type": "application/json",
+                  "Prefer": "resolution=merge-duplicates,return=minimal",
+              },
+              json=payload,
+              timeout=45,
+          )
+          response.raise_for_status()
+          print("Dry-run report securely stored in the private Supabase database.")
+          PY
+          echo "Dry-run completed. Report is stored in private Supabase, not in this public repository's logs or artifacts."
