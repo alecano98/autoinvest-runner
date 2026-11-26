@@ -25,12 +25,17 @@ jobs:
           path: source
           persist-credentials: false
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install Python dependencies
         working-directory: source
         run: |
           set -euo pipefail
-          python3.11 --version
-          python3.11 -m pip install --disable-pip-version-check -r requirements.txt
+          python --version
+          python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Run read-only paper dry-run
         working-directory: source
@@ -54,6 +59,6 @@ jobs:
           test -n "$ALPACA_API_KEY" || { echo "::error::Missing ALPACA_API_KEY secret"; exit 1; }
           test -n "$ALPACA_SECRET_KEY" || { echo "::error::Missing ALPACA_SECRET_KEY secret"; exit 1; }
           test -n "$AUTOINVEST_COST_SCHEDULE_JSON" || { echo "::error::Missing AUTOINVEST_COST_SCHEDULE_JSON secret"; exit 1; }
-          python3.11 scripts/run_integrated_daily_paper_supabase.py --start-date "$AUTOINVEST_START_DATE" --feed "$ALPACA_DATA_FEED" > /tmp/autoinvest-dry-run.json
-          python3.11 -m json.tool /tmp/autoinvest-dry-run.json > /dev/null
+          python scripts/run_integrated_daily_paper_supabase.py --start-date "$AUTOINVEST_START_DATE" --feed "$ALPACA_DATA_FEED" > /tmp/autoinvest-dry-run.json
+          python -m json.tool /tmp/autoinvest-dry-run.json > /dev/null
           echo "Dry-run completed. Report is intentionally not published in this public repository's logs or artifacts."
