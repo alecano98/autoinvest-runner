@@ -1,0 +1,82 @@
+name: AutoInvest hourly crypto paper runner
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Dry-run is read-only; apply commits one simulated BTC/ETH cycle"
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - apply
+        default: dry-run
+      lookback_days:
+        description: "Hourly Binance Spot history window (minimum 90 days)"
+        required: false
+        default: "120"
+
+permissions:
+  contents: read
+
+# Serialize with the securities runner because both use the same private EUR paper ledger.
+concurrency:
+  group: autoinvest-shared-paper-ledger
+  cancel-in-progress: false
+
+jobs:
+  crypto-paper:
+    name: Private-source BTC/ETH paper cycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout private AutoInvest source (read-only token)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: alecano98/autoinvest
+          ref: main
+          token: ${{ secrets.AUTOINVEST_SOURCE_READ_TOKEN }}
+          path: source
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: source/requirements.txt
+
+      - name: Install Python dependencies
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python --version
+          python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run shared-ledger BTC/ETH paper cycle
+        working-directory: source
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AUTOINVEST_CRYPTO_COST_SCHEDULE_JSON: ${{ secrets.AUTOINVEST_CRYPTO_COST_SCHEDULE_JSON }}
+          RUN_MODE: ${{ inputs.mode || 'dry-run' }}
+          LOOKBACK_DAYS: ${{ inputs.lookback_days || '120' }}
+          PYTHONPATH: "."
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_URL" || { echo "::error::Missing SUPABASE_URL repository secret"; exit 1; }
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || { echo "::error::Missing SUPABASE_SERVICE_ROLE_KEY repository secret"; exit 1; }
+          test -n "$AUTOINVEST_SOURCE_READ_TOKEN" || true
+          mkdir -p /tmp/autoinvest-crypto
+          args=(--lookback-days "$LOOKBACK_DAYS" --output /tmp/autoinvest-crypto/crypto-paper-report.json)
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" || "$RUN_MODE" == "apply" ]]; then
+            args+=(--apply)
+          fi
+          # The detailed report stays on the ephemeral runner and in private Supabase;
+          # never print it or upload it as a public-repository artifact.
+          python scripts/run_crypto_paper_supabase.py "${args[@]}" > /tmp/autoinvest-crypto/runner-output.json
+          python -m json.tool /tmp/autoinvest-crypto/crypto-paper-report.json >/dev/null
+          echo "Crypto paper cycle completed. Detailed portfolio report was not written to public logs or artifacts."
