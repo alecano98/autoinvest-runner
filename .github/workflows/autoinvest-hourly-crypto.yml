@@ -74,8 +74,59 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == "schedule" || "$RUN_MODE" == "apply" ]]; then
             args+=(--apply)
           fi
-          # The detailed report stays on the ephemeral runner and in private Supabase;
-          # never print it or upload it as a public-repository artifact.
           python scripts/run_crypto_paper_supabase.py "${args[@]}" > /tmp/autoinvest-crypto/runner-output.json
           python -m json.tool /tmp/autoinvest-crypto/crypto-paper-report.json >/dev/null
-          echo "Crypto paper cycle completed. Detailed portfolio report was not written to public logs or artifacts."
+          echo "Crypto paper cycle completed; uploading the private report to Supabase."
+
+      - name: Persist detailed report in private Supabase history
+        working-directory: source
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          report_path = Path("/tmp/autoinvest-crypto/crypto-paper-report.json")
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          base_url = os.environ["SUPABASE_URL"].rstrip("/")
+          api_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+          run_id = int(os.environ["GITHUB_RUN_ID"])
+          run_number = int(os.environ["GITHUB_RUN_NUMBER"])
+          repo = os.environ["GITHUB_REPOSITORY"]
+          server = os.environ["GITHUB_SERVER_URL"].rstrip("/")
+          payload = {
+              "run_id": run_id,
+              "run_number": run_number,
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "workflow_run_url": f"{server}/{repo}/actions/runs/{run_id}",
+              "report": report,
+          }
+          request = urllib.request.Request(
+              f"{base_url}/rest/v1/autoinvest_crypto_run_reports",
+              data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+              headers={
+                  "apikey": api_key,
+                  "Authorization": f"Bearer {api_key}",
+                  "Content-Type": "application/json",
+                  "Prefer": "resolution=merge-duplicates,return=minimal",
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  if response.status not in (200, 201, 204):
+                      raise RuntimeError(f"Unexpected Supabase status: {response.status}")
+          except urllib.error.HTTPError as exc:
+              raise RuntimeError(f"Supabase report persistence failed: HTTP {exc.code}") from exc
+          print(f"Private crypto report persisted (run {run_number}).")
+          PY
